@@ -68,7 +68,7 @@ st.markdown("""
             font-weight: 600;
         }
     </style>
-""", unsafe_style_html=True)
+""", unsafe_allow_html=True)
 
 # Define Hyperparameter Spaces (from main.ipynb)
 PARAM_SPACE = {
@@ -210,8 +210,8 @@ def parse_uploaded_file(uploaded_file):
         return None
 
 # App UI Header
-st.markdown('<div class="main-title">🧬 Genetic Algorithm Optimizer</div>', unsafe_style_html=True)
-st.markdown('<div class="subtitle">Joint Feature Selection & Hyperparameter Optimization Dashboard</div>', unsafe_style_html=True)
+st.markdown('<div class="main-title">🧬 Genetic Algorithm Optimizer</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Joint Feature Selection & Hyperparameter Optimization Dashboard</div>', unsafe_allow_html=True)
 
 # Sidebar layout
 st.sidebar.image("https://img.icons8.com/color/144/dna.png", width=80)
@@ -281,7 +281,7 @@ if X is not None and y is not None:
             st.subheader("🧬 Run Progress")
             
             for m_name in selected_models:
-                st.markdown(f"#### Running Optimization for <span class='highlight-text'>{m_name}</span>", unsafe_style_html=True)
+                st.markdown(f"#### Running Optimization for <span class='highlight-text'>{m_name}</span>", unsafe_allow_html=True)
                 
                 # Baseline
                 baseline_acc = cross_val_score(default_model(m_name), X, y, cv=5).mean()
