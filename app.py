@@ -214,7 +214,7 @@ st.markdown('<div class="main-title">🧬 Genetic Algorithm Optimizer</div>', un
 st.markdown('<div class="subtitle">Joint Feature Selection & Hyperparameter Optimization Dashboard</div>', unsafe_allow_html=True)
 
 # Sidebar layout
-st.sidebar.image("https://img.icons8.com/color/144/dna.png", width=80)
+st.sidebar.markdown("<h1 style='text-align: center; font-size: 4rem; margin: 0px; padding: 0px;'>🧬</h1>", unsafe_allow_html=True)
 st.sidebar.header("Configuration")
 
 # Dataset Selection
@@ -266,8 +266,10 @@ if X is not None and y is not None:
     with c2:
         st.metric(label="Total Features", value=X.shape[1])
     with c3:
-        class_dist = dict(zip(*np.unique(y, return_counts=True)))
-        st.metric(label="Class Distribution", value=str(class_dist))
+        classes, counts = np.unique(y, return_counts=True)
+        class_dist = {int(c): int(count) for c, count in zip(classes, counts)}
+        dist_str = " | ".join([f"Class {k}: {v}" for k, v in class_dist.items()])
+        st.metric(label="Class Distribution", value=dist_str)
 
     if run_opt:
         if not selected_models:
