@@ -6,11 +6,15 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 
-from sklearn.datasets import load_breast_cancer, fetch_openml
+from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 import warnings
 warnings.filterwarnings('ignore')
@@ -70,7 +74,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Define Hyperparameter Spaces (from main.ipynb)
+# Define Hyperparameter Spaces for 9 models
 PARAM_SPACE = {
     'KNN': {
         'n_neighbors': [3, 5, 7, 9, 11, 15],
@@ -86,6 +90,33 @@ PARAM_SPACE = {
         'n_estimators':      [50, 100, 200],
         'max_depth':         [None, 5, 10, 20],
         'min_samples_split': [2, 5, 10],
+    },
+    'LR': {
+        'C':        [0.01, 0.1, 1.0, 10.0],
+        'penalty':  ['l2'],
+        'solver':   ['lbfgs', 'liblinear'],
+    },
+    'DT': {
+        'criterion':         ['gini', 'entropy'],
+        'max_depth':         [None, 3, 5, 10],
+        'min_samples_split': [2, 5, 10],
+    },
+    'Ada': {
+        'n_estimators':  [50, 100, 200],
+        'learning_rate': [0.01, 0.1, 1.0],
+    },
+    'GB': {
+        'n_estimators':  [50, 100, 150],
+        'learning_rate': [0.01, 0.1, 0.2],
+        'max_depth':     [3, 5],
+    },
+    'NB': {
+        'var_smoothing': [1e-9, 1e-8, 1e-7, 1e-6],
+    },
+    'MLP': {
+        'hidden_layer_sizes': [(50,), (100,), (50, 50)],
+        'activation':         ['tanh', 'relu'],
+        'learning_rate_init': [0.001, 0.01],
     },
 }
 
@@ -104,7 +135,19 @@ def build_model(model_name, param_genes):
     elif model_name == 'SVM':
         return SVC(random_state=42, max_iter=2000, **p)
     elif model_name == 'RF':
-        return RandomForestClassifier(random_state=42, **p)
+        return RandomForestClassifier(n_jobs=-1, random_state=42, **p)
+    elif model_name == 'LR':
+        return LogisticRegression(random_state=42, max_iter=1000, **p)
+    elif model_name == 'DT':
+        return DecisionTreeClassifier(random_state=42, **p)
+    elif model_name == 'Ada':
+        return AdaBoostClassifier(random_state=42, **p)
+    elif model_name == 'GB':
+        return GradientBoostingClassifier(random_state=42, **p)
+    elif model_name == 'NB':
+        return GaussianNB(**p)
+    elif model_name == 'MLP':
+        return MLPClassifier(random_state=42, max_iter=500, early_stopping=True, **p)
 
 def default_model(model_name):
     """Return a model with sklearn defaults for baseline comparison."""
@@ -113,7 +156,19 @@ def default_model(model_name):
     elif model_name == 'SVM':
         return SVC(random_state=42, max_iter=2000)
     elif model_name == 'RF':
-        return RandomForestClassifier(n_estimators=100, random_state=42)
+        return RandomForestClassifier(n_jobs=-1, n_estimators=100, random_state=42)
+    elif model_name == 'LR':
+        return LogisticRegression(random_state=42, max_iter=1000)
+    elif model_name == 'DT':
+        return DecisionTreeClassifier(random_state=42)
+    elif model_name == 'Ada':
+        return AdaBoostClassifier(random_state=42)
+    elif model_name == 'GB':
+        return GradientBoostingClassifier(random_state=42)
+    elif model_name == 'NB':
+        return GaussianNB()
+    elif model_name == 'MLP':
+        return MLPClassifier(random_state=42, max_iter=500, early_stopping=True)
 
 # GA chromosome helpers
 def random_chromosome(n_features, model_name):
@@ -127,18 +182,29 @@ def random_chromosome(n_features, model_name):
 def split_chromosome(chromo, n_features):
     return chromo[:n_features].astype(int), chromo[n_features:].astype(int)
 
-def fitness(chromo, model_name, X, y, n_features):
-    """Joint fitness: 0.99 * CV_accuracy + 0.01 * feature_reduction_bonus"""
+def fitness(chromo, model_name, X, y, n_features, cache=None):
+    """Joint fitness with caching and parallel execution: 0.99 * CV_accuracy + 0.01 * feature_reduction_bonus"""
+    if cache is not None:
+        key = (model_name, tuple(chromo.tolist()))
+        if key in cache:
+            return cache[key]
+
     feat_bits, param_genes = split_chromosome(chromo, n_features)
     if not any(feat_bits):
-        return 0.0
-    model  = build_model(model_name, param_genes)
-    try:
-        score  = cross_val_score(model, X[:, feat_bits == 1], y, cv=5).mean()
-    except Exception:
-        score = 0.0
-    bonus  = 1.0 - feat_bits.sum() / n_features
-    return 0.99 * score + 0.01 * bonus
+        val = 0.0
+    else:
+        model  = build_model(model_name, param_genes)
+        try:
+            # Parallelize cross validation folds using n_jobs=-1
+            score  = cross_val_score(model, X[:, feat_bits == 1], y, cv=5, n_jobs=-1).mean()
+        except Exception:
+            score = 0.0
+        bonus  = 1.0 - feat_bits.sum() / n_features
+        val = 0.99 * score + 0.01 * bonus
+
+    if cache is not None:
+        cache[key] = val
+    return val
 
 def crossover(p1, p2):
     n = len(p1)
@@ -165,11 +231,13 @@ def get_breast_cancer():
 
 @st.cache_data
 def get_ionosphere():
-    data = fetch_openml('ionosphere', version=1, as_frame=True)
-    X = data.data.values.astype(float)
+    # Fast load directly from UCI database
+    url = "https://archive.ics.uci.edu/ml/machine-learning-databases/ionosphere/ionosphere.data"
+    df = pd.read_csv(url, header=None)
+    X = df.iloc[:, :-1].values.astype(float)
     le = LabelEncoder()
-    y = le.fit_transform(data.target)
-    feature_names = data.feature_names
+    y = le.fit_transform(df.iloc[:, -1])
+    feature_names = [f"feat_{i}" for i in range(X.shape[1])]
     return StandardScaler().fit_transform(X), y, feature_names
 
 def parse_uploaded_file(uploaded_file):
@@ -228,7 +296,7 @@ if dataset_choice == "Breast Cancer (Built-in)":
     X, y, feature_names = get_breast_cancer()
     st.info("Loaded Breast Cancer Dataset (569 samples, 30 features)")
 elif dataset_choice == "Ionosphere (OpenML)":
-    with st.spinner("Downloading Ionosphere Dataset..."):
+    with st.spinner("Loading Ionosphere Dataset..."):
         X, y, feature_names = get_ionosphere()
     st.info("Loaded Ionosphere Dataset (351 samples, 34 features)")
 else:
@@ -241,10 +309,10 @@ else:
     else:
         st.warning("Please upload a CSV file to proceed.")
 
-# Model Selection
+# Model Selection - Now supports all 9 models!
 selected_models = st.sidebar.multiselect(
     "Select Classifiers",
-    ["KNN", "SVM", "RF"],
+    ["KNN", "SVM", "RF", "LR", "DT", "Ada", "GB", "NB", "MLP"],
     default=["KNN", "SVM", "RF"]
 )
 
@@ -259,17 +327,27 @@ run_opt = st.sidebar.button("🚀 Run GA Optimization", use_container_width=True
 
 # Main Area
 if X is not None and y is not None:
-    # Display Dataset Metrics
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric(label="Total Samples", value=X.shape[0])
-    with c2:
-        st.metric(label="Total Features", value=X.shape[1])
-    with c3:
-        classes, counts = np.unique(y, return_counts=True)
-        class_dist = {int(c): int(count) for c, count in zip(classes, counts)}
-        dist_str = " | ".join([f"Class {k}: {v}" for k, v in class_dist.items()])
-        st.metric(label="Class Distribution", value=dist_str)
+    # Display Dataset Metrics in a beautiful custom HTML structure (no truncation or leakage)
+    classes, counts = np.unique(y, return_counts=True)
+    class_dist = {int(c): int(count) for c, count in zip(classes, counts)}
+    dist_str = ", ".join([f"<span class='highlight-text'>{k}</span>: {v}" for k, v in class_dist.items()])
+    
+    st.markdown(f"""
+        <div style="display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap;">
+            <div class="metric-card" style="flex: 1; min-width: 200px; text-align: center;">
+                <div style="font-size: 0.9rem; color: #888888; text-transform: uppercase; letter-spacing: 1px;">Total Samples</div>
+                <div style="font-size: 2.2rem; font-weight: 800; color: #ffffff; margin-top: 0.5rem;">{X.shape[0]}</div>
+            </div>
+            <div class="metric-card" style="flex: 1; min-width: 200px; text-align: center;">
+                <div style="font-size: 0.9rem; color: #888888; text-transform: uppercase; letter-spacing: 1px;">Total Features</div>
+                <div style="font-size: 2.2rem; font-weight: 800; color: #ffffff; margin-top: 0.5rem;">{X.shape[1]}</div>
+            </div>
+            <div class="metric-card" style="flex: 1.5; min-width: 280px; text-align: center;">
+                <div style="font-size: 0.9rem; color: #888888; text-transform: uppercase; letter-spacing: 1px;">Class Distribution</div>
+                <div style="font-size: 1.4rem; font-weight: 600; color: #ffffff; margin-top: 0.9rem;">{dist_str}</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
     if run_opt:
         if not selected_models:
@@ -282,11 +360,14 @@ if X is not None and y is not None:
             st.write("---")
             st.subheader("🧬 Run Progress")
             
+            # Global evaluation cache to speed up GA optimization runs
+            eval_cache = {}
+            
             for m_name in selected_models:
                 st.markdown(f"#### Running Optimization for <span class='highlight-text'>{m_name}</span>", unsafe_allow_html=True)
                 
-                # Baseline
-                baseline_acc = cross_val_score(default_model(m_name), X, y, cv=5).mean()
+                # Baseline - optimized parallel runs
+                baseline_acc = cross_val_score(default_model(m_name), X, y, cv=5, n_jobs=-1).mean()
                 
                 # GA Process Setup
                 progress_bar = st.progress(0)
@@ -297,7 +378,8 @@ if X is not None and y is not None:
                 history = []
                 
                 for gen in range(generations):
-                    scores = [fitness(c, m_name, X, y, n_feat) for c in pop]
+                    # Cache evaluation values to skip re-running duplicate chromosomes
+                    scores = [fitness(c, m_name, X, y, n_feat, cache=eval_cache) for c in pop]
                     order  = np.argsort(scores)[::-1]
                     pop    = [pop[i] for i in order]
                     gen_best = scores[order[0]]
@@ -327,7 +409,7 @@ if X is not None and y is not None:
                 best_params = decode_params(m_name, param_genes)
                 n_sel = int(feat_bits.sum())
                 
-                ga_acc = (cross_val_score(build_model(m_name, param_genes), X[:, feat_bits == 1], y, cv=5).mean()
+                ga_acc = (cross_val_score(build_model(m_name, param_genes), X[:, feat_bits == 1], y, cv=5, n_jobs=-1).mean()
                           if n_sel > 0 else baseline_acc)
                 
                 delta = ga_acc - baseline_acc
