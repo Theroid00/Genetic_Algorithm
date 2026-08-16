@@ -6,6 +6,7 @@ colorTo: indigo
 sdk: streamlit
 app_file: app.py
 pinned: false
+license: apache-2.0
 ---
 
 # Joint Feature Selection & Hyperparameter Optimization with GA
